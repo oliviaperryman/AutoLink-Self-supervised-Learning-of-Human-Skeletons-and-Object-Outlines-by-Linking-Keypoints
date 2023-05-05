@@ -4,6 +4,8 @@ from torch import nn
 from typing import Union
 import pytorch_lightning as pl
 
+import torchvision
+from models.encoder import gen_grid3d
 
 def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.Tensor:
     """
@@ -23,11 +25,11 @@ def draw_lines(paired_joints: torch.Tensor, heatmap_size: int=16, thick: Union[f
     dist[i,j] = ||x[b,i,:]-y[b,j,:]||^2
     """
     bs, n_points, _, _ = paired_joints.shape
-    start = paired_joints[:, :, 0, :]   # (batch_size, n_points, 2)
-    end = paired_joints[:, :, 1, :]     # (batch_size, n_points, 2)
-    paired_diff = end - start           # (batch_size, n_points, 2)
-    grid = gen_grid2d(heatmap_size).to(paired_joints.device).reshape(1, 1, -1, 2)
-    diff_to_start = grid - start.unsqueeze(-2)  # (batch_size, n_points, heatmap_size**2, 2)
+    start = paired_joints[:, :, 0, :]   # (batch_size, n_points, 3)
+    end = paired_joints[:, :, 1, :]     # (batch_size, n_points, 3)
+    paired_diff = end - start           # (batch_size, n_points, 3)
+    grid = gen_grid3d(heatmap_size).to(paired_joints.device).reshape(1, 1, -1, 3)
+    diff_to_start = grid - start.unsqueeze(-2)  # (batch_size, n_points, heatmap_size**3, 3)
     # (batch_size, n_points, heatmap_size**2)
     t = (diff_to_start @ paired_diff.unsqueeze(-1)).squeeze(-1) / (1e-8+paired_diff.square().sum(dim=-1, keepdim=True))
 
@@ -37,7 +39,7 @@ def draw_lines(paired_joints: torch.Tensor, heatmap_size: int=16, thick: Union[f
     after_end = (t >= 1).float() * diff_to_end.square().sum(dim=-1)
     between_start_end = (0 < t).float() * (t < 1).float() * (grid - (start.unsqueeze(-2) + t.unsqueeze(-1) * paired_diff.unsqueeze(-2))).square().sum(dim=-1)
 
-    squared_dist = (before_start + after_end + between_start_end).reshape(bs, n_points, heatmap_size, heatmap_size)
+    squared_dist = (before_start + after_end + between_start_end).reshape(bs, n_points, heatmap_size, heatmap_size, heatmap_size)
     heatmaps = torch.exp(- squared_dist / thick)
     return heatmaps
 
@@ -128,19 +130,25 @@ class Decoder(nn.Module):
     def rasterize(self, keypoints: torch.Tensor, output_size: int=128) -> torch.Tensor:
         """
         Generate edge heatmap from keypoints, where edges are weighted by the learned scalars.
-        :param keypoints: (batch_size, n_points, 2)
+        :param keypoints: (batch_size, n_points, 3)
         :return: (batch_size, 1, heatmap_size, heatmap_size)
         """
 
-        paired_joints = torch.stack([keypoints[:, self.skeleton_idx[0], :2], keypoints[:, self.skeleton_idx[1], :2]], dim=2)
+        paired_joints = torch.stack([keypoints[:, self.skeleton_idx[0], :3], keypoints[:, self.skeleton_idx[1], :3]], dim=2)
 
         skeleton_scalar = F.softplus(self.skeleton_scalar * self.sklr)
         skeleton_scalar = torch.triu(skeleton_scalar, diagonal=1)
-        skeleton_scalar = skeleton_scalar[self.skeleton_idx[0], self.skeleton_idx[1]].reshape(1, self.n_skeleton, 1, 1)
+        skeleton_scalar = skeleton_scalar[self.skeleton_idx[0], self.skeleton_idx[1]].reshape(1, self.n_skeleton, 1, 1, 1) # add dim for 3D
 
-        skeleton_heatmap_sep = draw_lines(paired_joints, heatmap_size=output_size, thick=self.thick)
-        skeleton_heatmap_sep = skeleton_heatmap_sep * skeleton_scalar.reshape(1, self.n_skeleton, 1, 1)
+        skeleton_heatmap_sep = draw_lines(paired_joints, heatmap_size=16, thick=self.thick)
+        skeleton_heatmap_sep = skeleton_heatmap_sep * skeleton_scalar.reshape(1, self.n_skeleton, 1, 1, 1)
         skeleton_heatmap = skeleton_heatmap_sep.max(dim=1, keepdim=True)[0]
+
+        # Flatten 3rd dimension for heatmaps, and resize to image size
+        skeleton_heatmap = skeleton_heatmap.mean(dim=-1)
+        skeleton_heatmap = torchvision.transforms.Resize(128)(skeleton_heatmap)
+
+
         return skeleton_heatmap
 
     def forward(self, input_dict: dict) -> dict:

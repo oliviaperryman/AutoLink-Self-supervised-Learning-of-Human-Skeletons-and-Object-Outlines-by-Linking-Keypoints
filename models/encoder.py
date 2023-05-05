@@ -13,6 +13,14 @@ def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.
     grid = torch.cat((x.reshape(-1, 1), y.reshape(-1, 1)), dim=1).reshape(grid_size, grid_size, 2)
     return grid
 
+def gen_grid3d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.Tensor:
+    """
+    Generate a grid of size (grid_size, grid_size, grid_size, 3) with coordinate values in the range [left_end, right_end]
+    """
+    x = torch.linspace(left_end, right_end, grid_size)
+    x, y, z = torch.meshgrid([x, x, x], indexing='ij')
+    grid = torch.cat((x.reshape(-1, 1), y.reshape(-1, 1), z.reshape(-1, 1)), dim=1).reshape(grid_size, grid_size, grid_size, 3)
+    return grid
 
 class ResBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int) -> None:
@@ -59,7 +67,7 @@ class Detector(nn.Module):
     def __init__(self, hyper_paras: pl.utilities.parsing.AttributeDict) -> None:
         super().__init__()
         self.n_parts = hyper_paras.n_parts
-        self.output_size = 32
+        self.output_size = 16
 
         self.conv = nn.Sequential(
             ResBlock(3, 64),  # 64
@@ -67,11 +75,13 @@ class Detector(nn.Module):
             ResBlock(128, 256),  # 16
             ResBlock(256, 512),  # 8
             TransposedBlock(512, 256),  # 16
-            TransposedBlock(256, 128),  # 32
-            nn.Conv2d(128, self.n_parts, kernel_size=3, padding=1),
+            # save memory in 3D, make grid only 16x16x16
+            # TransposedBlock(256, 128),  # 32 
+            nn.Conv2d(256, self.n_parts * self.output_size, kernel_size=3, padding=1),
         )
 
-        grid = gen_grid2d(self.output_size).reshape(1, 1, self.output_size ** 2, 2)
+        # grid = gen_grid2d(self.output_size).reshape(1, 1, self.output_size ** 2, 2) 
+        grid = gen_grid3d(self.output_size).reshape(1, 1, self.output_size ** 3, 3)
         self.coord = nn.Parameter(grid, requires_grad=False)
 
     def forward(self, input_dict: dict) -> dict:
@@ -80,7 +90,7 @@ class Detector(nn.Module):
         prob_map = F.softmax(prob_map, dim=2)
         keypoints = self.coord * prob_map
         keypoints = keypoints.sum(dim=2)
-        prob_map = prob_map.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size)
+        prob_map = prob_map.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size, self.output_size)
         return {'keypoints': keypoints, 'prob_map': prob_map}
 
 
