@@ -62,7 +62,7 @@ class Model(pl.LightningModule):
         self.vgg_loss.eval()
         out_batch = self.decoder(self.encoder(batch, need_masked_img=True))
 
-        perceptual_loss = self.vgg_loss(out_batch['img'], batch['img'])
+        perceptual_loss = self.vgg_loss(out_batch['img'], batch['img_rotated'])
 
         self.log("perceptual_loss", perceptual_loss)
         self.log("alpha", self.decoder.alpha.detach().cpu())
