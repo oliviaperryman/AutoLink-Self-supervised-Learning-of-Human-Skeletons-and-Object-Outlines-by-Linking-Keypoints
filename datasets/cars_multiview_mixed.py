@@ -1,12 +1,10 @@
 from typing import List
 import torch
 import torch.utils.data
-import torchvision
 from torchvision import transforms
 
 from PIL import Image
 from os import listdir
-import numpy as np
 
 import random
 from collections import namedtuple
@@ -63,86 +61,15 @@ class TrainSet(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.all_files) + len(self.stanford_files)
 
+
 class TrainRegSet(TrainSet):
     def __init__(self, data_root, image_size):
         super().__init__(data_root, image_size)
 
+
 class TestSet(TrainSet):
     def __init__(self, data_root, image_size):
         super().__init__(data_root, image_size)
-
-# class TrainRegSet(torch.utils.data.Dataset):
-#     def __init__(self, data_root, image_size):
-#         super().__init__()
-#         self.car_sequences = get_multiview_metadata()
-#         random.seed(0)
-
-#         self.transform = transforms.Compose([
-#             transforms.Resize((image_size, image_size)),
-#             transforms.ToTensor(),
-#             transforms.RandomHorizontalFlip(p=0.0),
-#             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-#         ])
-#         self.path = 'cars/epfl-gims08/tripod-seq/tripod_seq_{:02d}_{:03d}.jpg'
-
-#         self.all_files = sorted(listdir(f'{data_root}/tripod-seq/'))
-
-#     def __getitem__(self, idx):
-#         img_path = self.all_files[idx]
-#         cur_seq = int(img_path.split('_')[2])
-#         cur_frame = int(img_path.split('_')[3].split('.')[0])
-
-#         orig_img = Image.open(self.path.format(cur_seq, cur_frame))
-#         img = self.transform(orig_img)
-
-#         frame_rotated, degrees = get_random_rotation(cur_seq, cur_frame, self.car_sequences)
-        
-#         path_rotated = self.path.format(cur_seq, frame_rotated)
-#         img_rotated = Image.open(path_rotated)
-#         img_rotated = self.transform(img_rotated)
-
-#         sample = {'img': img, 'img_rotated': img_rotated, 'degrees': degrees}
-#         return sample
-
-#     def __len__(self):
-#         return len(self.all_files)
-
-
-# class TestSet(torch.utils.data.Dataset):
-#     def __init__(self, data_root, image_size):
-#         super().__init__()
-#         self.car_sequences = get_multiview_metadata()
-#         random.seed(0)
-
-#         self.transform = transforms.Compose([
-#             transforms.Resize((image_size, image_size)),
-#             transforms.ToTensor(),
-#             transforms.RandomHorizontalFlip(p=0.0), # TODO change to 0.5?
-#             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-#         ])
-#         self.path = 'cars/epfl-gims08/tripod-seq/tripod_seq_{:02d}_{:03d}.jpg'
-
-#         self.all_files = sorted(listdir(f'{data_root}/tripod-seq/'))
-
-#     def __getitem__(self, idx):
-#         img_path = self.all_files[idx]
-#         cur_seq = int(img_path.split('_')[2])
-#         cur_frame = int(img_path.split('_')[3].split('.')[0])
-
-#         orig_img = Image.open(self.path.format(cur_seq, cur_frame))
-#         img = self.transform(orig_img)
-
-#         frame_rotated, degrees = get_random_rotation(cur_seq, cur_frame, self.car_sequences)
-        
-#         path_rotated = self.path.format(cur_seq, frame_rotated)
-#         img_rotated = Image.open(path_rotated)
-#         img_rotated = self.transform(img_rotated)
-
-#         sample = {'img': img, 'img_rotated': img_rotated, 'degrees': degrees}
-#         return sample
-
-#     def __len__(self):
-#         return len(self.all_files)
 
 
 def regress_kp(batch_list):

@@ -1,12 +1,10 @@
 from typing import List
 import torch
 import torch.utils.data
-import torchvision
 from torchvision import transforms
 
 from PIL import Image
 from os import listdir
-import numpy as np
 
 import random
 from collections import namedtuple
