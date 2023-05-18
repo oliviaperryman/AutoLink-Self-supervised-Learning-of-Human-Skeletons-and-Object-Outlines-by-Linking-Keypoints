@@ -37,7 +37,7 @@
                 "--data_root",
                 "cars/epfl-gims08/",
                 "--dataset",
-                "cars_multiview",
+                "cars_multiview_mixed",
                 "--batch_size",
                 "16"
             ]
