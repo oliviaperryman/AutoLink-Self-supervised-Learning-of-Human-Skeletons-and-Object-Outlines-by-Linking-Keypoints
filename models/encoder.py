@@ -71,7 +71,7 @@ class Detector(nn.Module):
     def __init__(self, hyper_paras: pl.utilities.parsing.AttributeDict) -> None:
         super().__init__()
         self.n_parts = hyper_paras.n_parts
-        self.output_size = 16
+        self.output_size = 32
 
         self.conv = nn.Sequential(
             ResBlock(3, 64),  # 64
@@ -79,9 +79,8 @@ class Detector(nn.Module):
             ResBlock(128, 256),  # 16
             ResBlock(256, 512),  # 8
             TransposedBlock(512, 256),  # 16
-            # save space
-            # TransposedBlock(256, 128),  # 32 
-            nn.Conv2d(256, self.n_parts * 2, kernel_size=3, padding=1), # double channels for xy and depth
+            TransposedBlock(256, 128),  # 32 
+            nn.Conv2d(128, self.n_parts * 2, kernel_size=3, padding=1), # double channels for xy and depth
         )
 
         grid = gen_grid2d(self.output_size).reshape(1, 1, self.output_size ** 2, 2) 
@@ -149,8 +148,8 @@ class Encoder(nn.Module):
     def __init__(self, hyper_paras: pl.utilities.parsing.AttributeDict) -> None:
         super().__init__()
         self.detector = Detector(hyper_paras)
-        self.missing = 0.8 # hyper_paras.missing
-        self.block = 16 # hyper_paras.block
+        self.missing = hyper_paras.missing
+        self.block = hyper_paras.block
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
