@@ -4,7 +4,7 @@ import torch.utils.data
 from torchvision import transforms
 
 from PIL import Image
-from os import listdir
+from os import listdir, path
 
 import random
 from collections import namedtuple
@@ -14,6 +14,7 @@ CarSequence = namedtuple('CarSequence', ['seq_id', 'frames', 'frames360', 'frame
 class TrainSet(torch.utils.data.Dataset):
     def __init__(self, data_root, image_size):
         super().__init__()
+        self.data_root = data_root
         self.car_sequences = get_multiview_metadata()
         random.seed(0)
 
@@ -23,9 +24,9 @@ class TrainSet(torch.utils.data.Dataset):
             transforms.RandomHorizontalFlip(p=0.0),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
-        self.path = 'cars/epfl-gims08/tripod-seq/tripod_seq_{:02d}_{:03d}.jpg'
+        self.filename = 'tripod_seq_{:02d}_{:03d}.jpg'
 
-        self.all_files = sorted(listdir(f'{data_root}/tripod-seq/'))
+        self.all_files = sorted(listdir(data_root))
 
         self.stanford_path = 'stanford_cars/cars_train/cars_train/'
 
@@ -37,13 +38,15 @@ class TrainSet(torch.utils.data.Dataset):
             cur_seq = int(img_path.split('_')[2])
             cur_frame = int(img_path.split('_')[3].split('.')[0])
 
-            orig_img = Image.open(self.path.format(cur_seq, cur_frame))
+            orig_img = Image.open(path.join(self.data_root, self.filename.format(cur_seq, cur_frame)))
+            orig_img = orig_img.convert('RGB')
             img = self.transform(orig_img)
 
             frame_rotated, degrees = get_random_rotation(cur_seq, cur_frame, self.car_sequences)
             
-            path_rotated = self.path.format(cur_seq, frame_rotated)
-            img_rotated = Image.open(path_rotated)
+            path_rotated = self.filename.format(cur_seq, frame_rotated)
+            img_rotated = Image.open(path.join(self.data_root, path_rotated))
+            img_rotated = img_rotated.convert('RGB')
             img_rotated = self.transform(img_rotated)
 
         else:
