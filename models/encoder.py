@@ -100,8 +100,8 @@ class Detector(nn.Module):
 
         # calculate depth
         prob_map_z = prob_map_z.reshape(img.shape[0], self.n_parts, -1, 1)
-        z = prob_map_z * prob_map_xy
-        z = z.sum(dim=2)
+        depth = prob_map_z * prob_map_xy
+        z = depth.sum(dim=2)
         # normalize to -1, 1
         z = torch.tanh(z)
         # depth = torch.tanh(z / 10) if depth gets too big
@@ -109,13 +109,14 @@ class Detector(nn.Module):
         keypoints_xyz = torch.cat((keypoints,z), dim=-1)
 
         # rotate keypoints
-        r = R.from_rotvec([deg * np.array([0, 1, 0]) for deg in input_dict["degrees"].detach().cpu().numpy()], degrees=True)
+        # keypoints are y,x so rotate around first dimension and negative degrees
+        r = R.from_rotvec([(-deg) * np.array([1, 0, 0]) for deg in input_dict["degrees"].detach().cpu().numpy()], degrees=True)
         matrix = r.as_matrix()
         keypoints_xyz_rot = torch.einsum('ijk,imk->imj', torch.tensor(matrix).to('cuda').float(), keypoints_xyz.clone())
 
         prob_map_xy = prob_map_xy.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size)
 
-        return {'keypoints': keypoints_xyz_rot, 'prob_map': prob_map_xy, "keypoints_before_rotation": keypoints_xyz}
+        return {'keypoints': keypoints_xyz_rot, 'prob_map': prob_map_xy, "keypoints_before_rotation": keypoints_xyz, "depth": depth}
 
 # Debugging functions
 def save_2D_kp(kp, name):
