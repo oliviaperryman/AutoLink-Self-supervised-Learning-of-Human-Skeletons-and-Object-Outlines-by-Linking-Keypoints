@@ -49,7 +49,7 @@ def draw_kp_grid(img, kp):
     kp = kp.detach().cpu()[:64]
 
     fig = plt.figure(figsize=(8, 8))
-    gs = gridspec.GridSpec(8, 8)
+    gs = gridspec.GridSpec(4, 4)
     gs.update(wspace=0, hspace=0)
 
     for i, sample in enumerate(img):
@@ -73,7 +73,7 @@ def draw_kp_grid_unnorm(img, kp):
     kp = kp.detach().cpu()[:64]
 
     fig = plt.figure(figsize=(8, 8))
-    gs = gridspec.GridSpec(8, 8)
+    gs = gridspec.GridSpec(4, 4)
     gs.update(wspace=0, hspace=0)
 
     for i, sample in enumerate(img):
@@ -91,8 +91,8 @@ def draw_kp_grid_unnorm(img, kp):
     return plot
 
 
-def draw_img_grid(img):
+def draw_img_grid(img, normalize=False):
     img = img[:64].detach().cpu()
-    nrow = min(8, img.shape[0])
-    img = torchvision.utils.make_grid(img[:64], nrow=nrow).permute(1, 2, 0)
+    nrow = min(4, img.shape[0])
+    img = torchvision.utils.make_grid(img[:64], nrow=nrow, normalize=normalize).permute(1, 2, 0)
     return torch.clamp(img * 255, min=0, max=255).numpy().astype(np.uint8)
