@@ -21,7 +21,8 @@ class TrainSet(torch.utils.data.Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.RandomHorizontalFlip(p=0.0), # TODO change to 0.5?
+            # transforms.RandomHorizontalFlip(p=0.0), # TODO change to 0.5?
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.3),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
         self.filename = 'tripod_seq_{:02d}_{:03d}.png'
