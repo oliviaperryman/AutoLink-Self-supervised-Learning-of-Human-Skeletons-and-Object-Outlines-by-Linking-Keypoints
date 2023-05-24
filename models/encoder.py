@@ -86,8 +86,8 @@ class Detector(nn.Module):
         grid = gen_grid2d(self.output_size).reshape(1, 1, self.output_size ** 2, 2) 
         self.coord = nn.Parameter(grid, requires_grad=False)
 
-    def forward(self, input_dict: dict) -> dict:
-        img = F.interpolate(input_dict['img'], size=(128, 128), mode='bilinear', align_corners=False)
+    def forward(self, img) -> dict:
+        img = F.interpolate(img, size=(128, 128), mode='bilinear', align_corners=False)
         prob_maps = self.conv(img)
         prob_map_xy = prob_maps[:, :self.n_parts, :, :]
         prob_map_z = prob_maps[:, self.n_parts:, :, :]
@@ -108,15 +108,10 @@ class Detector(nn.Module):
 
         keypoints_xyz = torch.cat((keypoints,z), dim=-1)
 
-        # rotate keypoints
-        # keypoints are y,x so rotate around first dimension and negative degrees
-        r = R.from_rotvec([(-deg) * np.array([1, 0, 0]) for deg in input_dict["degrees"].detach().cpu().numpy()], degrees=True)
-        matrix = r.as_matrix()
-        keypoints_xyz_rot = torch.einsum('ijk,imk->imj', torch.tensor(matrix).to('cuda').float(), keypoints_xyz.clone())
-
         prob_map_xy = prob_map_xy.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size)
 
-        return {'keypoints': keypoints_xyz_rot, 'prob_map': prob_map_xy, "keypoints_before_rotation": keypoints_xyz, "depth": depth}
+        return {'keypoints': keypoints_xyz, 'prob_map': prob_map_xy, "depth": depth}
+
 
 # Debugging functions
 def save_2D_kp(kp, name):
@@ -158,10 +153,63 @@ class Encoder(nn.Module):
                 if m.bias is not None:
                     m.bias.data.zero_()
 
+    def compute_rotation_and_translation(self, kp_A, kp_B):
+        # Find the rotation between two sets of keypoints
+        # https://nghiaho.com/?page_id=671
+
+        centroids_A = kp_A.mean(dim=1)
+        centroids_B = kp_B.mean(dim=1)
+
+        covariance = torch.einsum('ijk,ilk->ijl', kp_A - centroids_A[:, None, :], kp_B - centroids_B[:, None, :])
+
+        u, s, v = torch.svd(covariance)
+        r = torch.einsum('ijk,ilk->ijl', v, u)
+
+        if torch.det(r) < 0:
+            v[:, :, 1] *= -1
+            r = torch.einsum('ijk,ilk->ijl', v, u)
+
+        translation = centroids_B - torch.einsum('ijk,ilk->ijl', r, centroids_A[:, None, :])
+
+        return r, translation
+    
+    
+    def rotate_keypoints(self, kp, axis_of_rotation, degrees):
+        r = R.from_rotvec([(deg) * np.array(axis_of_rotation) for deg in degrees.detach().cpu().numpy()], degrees=True)
+        matrix = r.as_matrix()
+        keypoints_rotated = torch.einsum('ijk,imk->imj', torch.tensor(matrix).to('cuda').float(), kp.clone())
+
+        return keypoints_rotated
+
     def forward(self, input_dict: dict, need_masked_img: bool=False) -> dict:
-        mask_batch = self.detector(input_dict)
+        mask_batch_A = self.detector(input_dict['img'])
+        mask_batch_B = self.detector(input_dict['img_rotated'])
+
+        kp_A = mask_batch_A['keypoints']
+        kp_B = mask_batch_B['keypoints']
+
+        # rotate keypoints
+        y_axis = torch.tensor([1,0,0])
+        predicted_offset_from_y_axis = None # TODO predict this
+        axis_of_rotation = y_axis + predicted_offset_from_y_axis
+
+        kp_A_rotated = self.rotate_keypoints(kp_A, axis_of_rotation, input_dict["degrees"])
+
+        # Align mean of kp_A_rotated with mean of kp_B
+        mean_A = kp_A_rotated.mean(dim=1)
+        mean_B = kp_B.mean(dim=1)
+        kp_A_rotated_adjusted = kp_A_rotated - mean_A[:, None, :]
+        kp_A_rotated_adjusted = kp_A_rotated_adjusted + mean_B[:, None, :]
+
+        # Align std of kp_A_rotated with std of kp_B
+        std_A = kp_A_rotated_adjusted.std(dim=1)
+        std_B = kp_B.std(dim=1)
+        kp_A_rotated_adjusted = kp_A_rotated_adjusted / std_A[:, None, :]
+        kp_A_rotated_adjusted = kp_A_rotated_adjusted * std_B[:, None, :]
+
         if need_masked_img:
             damage_mask = torch.zeros(input_dict['img_rotated'].shape[0], 1, self.block, self.block, device=input_dict['img_rotated'].device).uniform_() > self.missing
             damage_mask = F.interpolate(damage_mask.to(input_dict['img_rotated']), size=input_dict['img_rotated'].shape[-1], mode='nearest')
-            mask_batch['damaged_img'] = input_dict['img_rotated'] * damage_mask
-        return mask_batch
+            mask_batch_A['damaged_img'] = input_dict['img_rotated'] * damage_mask
+        
+        return mask_batch_A
