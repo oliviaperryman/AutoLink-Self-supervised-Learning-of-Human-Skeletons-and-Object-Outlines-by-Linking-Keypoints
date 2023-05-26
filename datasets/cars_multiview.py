@@ -2,6 +2,7 @@ from typing import List
 import torch
 import torch.utils.data
 from torchvision import transforms
+import torchvision.transforms.functional as TF
 
 from PIL import Image
 from os import listdir, path
@@ -22,8 +23,7 @@ class TrainSet(torch.utils.data.Dataset):
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             # transforms.RandomHorizontalFlip(p=0.0), # TODO change to 0.5?
-            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.3),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
         self.filename = 'tripod_seq_{:02d}_{:03d}.png'
         self.all_files = sorted(listdir(data_root))
@@ -43,6 +43,27 @@ class TrainSet(torch.utils.data.Dataset):
         img_rotated = Image.open(path.join(self.data_root, path_rotated))
         img_rotated = img_rotated.convert('RGB')
         img_rotated = self.transform(img_rotated)
+
+        # Add the same color jitter to both images
+        color_jitter = transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.3)
+        transform = transforms.ColorJitter.get_params(
+            color_jitter.brightness, color_jitter.contrast, color_jitter.saturation,
+            color_jitter.hue)
+        normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        
+        order, brightness_factor, contrast_factor, saturation_factor, hue_factor = transform
+
+        img = TF.adjust_brightness(img, brightness_factor)
+        img = TF.adjust_contrast(img, contrast_factor)
+        img = TF.adjust_saturation(img, saturation_factor)
+        img = TF.adjust_hue(img, hue_factor)
+        img = normalize((img))
+
+        img_rotated = TF.adjust_brightness(img_rotated, brightness_factor)
+        img_rotated = TF.adjust_contrast(img_rotated, contrast_factor)
+        img_rotated = TF.adjust_saturation(img_rotated, saturation_factor)
+        img_rotated = TF.adjust_hue(img_rotated, hue_factor)
+        img_rotated = normalize((img_rotated))
 
         sample = {'img': img, 'img_rotated': img_rotated, 'degrees': degrees}
         return sample
