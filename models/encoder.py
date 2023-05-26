@@ -7,6 +7,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 
+from pytorch3d_transforms_rotation_conversions import matrix_to_axis_angle
+
 
 def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.Tensor:
     """
@@ -160,22 +162,43 @@ class Encoder(nn.Module):
         centroids_A = kp_A.mean(dim=1)
         centroids_B = kp_B.mean(dim=1)
 
-        covariance = torch.einsum('ijk,ilk->ijl', kp_A - centroids_A[:, None, :], kp_B - centroids_B[:, None, :])
+        covariance = torch.einsum('ijk,ijl->ikl', kp_A - centroids_A[:, None, :], kp_B - centroids_B[:, None, :])
+        # cast matrix to float https://discuss.pytorch.org/t/svd-error-svd-cuda-gesvdj-not-implemented-for-half/132268
+        covariance = covariance.float()
 
         u, s, v = torch.svd(covariance)
+        # v times u transpose
         r = torch.einsum('ijk,ilk->ijl', v, u)
 
-        if torch.det(r) < 0:
+        r = r.float()
+
+        if (torch.det(r) < 0).any():
             v[:, :, 1] *= -1
             r = torch.einsum('ijk,ilk->ijl', v, u)
 
-        translation = centroids_B - torch.einsum('ijk,ilk->ijl', r, centroids_A[:, None, :])
+        translation = centroids_B - torch.einsum('ijk,ilk->ijl', r, centroids_A[:, None, :]).squeeze()
 
         return r, translation
+
+    def rotation_matrix_to_axis_angle(self, r):
+        # https://stackoverflow.com/questions/12463487/obtain-rotation-axis-from-rotation-matrix-and-translation-vector-in-opencv
+
+        # angle = acos(( R00 + R11 + R22 - 1)/2);
+        angle = torch.acos((torch.trace(r) - 1) / 2)
+
+        # x = (R21 - R12)/sqrt((R21 - R12)^2+(R02 - R20)^2+(R10 - R01)^2);
+        # y = (R02 - R20)/sqrt((R21 - R12)^2+(R02 - R20)^2+(R10 - R01)^2);
+        # z = (R10 - R01)/sqrt((R21 - R12)^2+(R02 - R20)^2+(R10 - R01)^2);
+        x = r[2, 1] - r[1, 2] / torch.sqrt((r[2, 1] - r[1, 2]) ** 2 + (r[0, 2] - r[2, 0]) ** 2 + (r[1, 0] - r[0, 1]) ** 2)
+        y = r[0, 2] - r[2, 0] / torch.sqrt((r[2, 1] - r[1, 2]) ** 2 + (r[0, 2] - r[2, 0]) ** 2 + (r[1, 0] - r[0, 1]) ** 2)
+        z = r[1, 0] - r[0, 1] / torch.sqrt((r[2, 1] - r[1, 2]) ** 2 + (r[0, 2] - r[2, 0]) ** 2 + (r[1, 0] - r[0, 1]) ** 2)
+
+        return torch.stack((x, y, z)), angle
     
     
     def rotate_keypoints(self, kp, axis_of_rotation, degrees):
-        r = R.from_rotvec([(deg) * np.array(axis_of_rotation) for deg in degrees.detach().cpu().numpy()], degrees=True)
+        rot_vec = degrees[:,None] * axis_of_rotation
+        r = R.from_rotvec(rot_vec.detach().cpu().numpy(), degrees=True)
         matrix = r.as_matrix()
         keypoints_rotated = torch.einsum('ijk,imk->imj', torch.tensor(matrix).to('cuda').float(), kp.clone())
 
@@ -188,10 +211,17 @@ class Encoder(nn.Module):
         kp_A = mask_batch_A['keypoints']
         kp_B = mask_batch_B['keypoints']
 
-        # rotate keypoints
-        y_axis = torch.tensor([1,0,0])
-        predicted_offset_from_y_axis = None # TODO predict this
-        axis_of_rotation = y_axis + predicted_offset_from_y_axis
+        r, translation = self.compute_rotation_and_translation(kp_A, kp_B)
+
+        # pytorch3d calculation
+        axis_angle = matrix_to_axis_angle(r)
+        angle_counterclockwise_radians = torch.linalg.norm(axis_angle, dim=1)
+        axis_of_rotation = axis_angle / angle_counterclockwise_radians[:,None]
+
+        # TODO try predicting axis with model as offset from y axis
+        # y_axis = torch.tensor([1,0,0])
+        # predicted_offset_from_y_axis = None 
+        # axis_of_rotation = y_axis + predicted_offset_from_y_axis
 
         kp_A_rotated = self.rotate_keypoints(kp_A, axis_of_rotation, input_dict["degrees"])
 
@@ -206,6 +236,10 @@ class Encoder(nn.Module):
         std_B = kp_B.std(dim=1)
         kp_A_rotated_adjusted = kp_A_rotated_adjusted / std_A[:, None, :]
         kp_A_rotated_adjusted = kp_A_rotated_adjusted * std_B[:, None, :]
+
+        mask_batch_A["keypoints_before_rotation"] = kp_A
+        mask_batch_A["keypoints_before_adjustment"] = kp_A_rotated
+        mask_batch_A["keypoints"] = kp_A_rotated_adjusted
 
         if need_masked_img:
             damage_mask = torch.zeros(input_dict['img_rotated'].shape[0], 1, self.block, self.block, device=input_dict['img_rotated'].device).uniform_() > self.missing
