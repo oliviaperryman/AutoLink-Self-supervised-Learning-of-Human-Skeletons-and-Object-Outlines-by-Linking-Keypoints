@@ -24,6 +24,6 @@ Pillow
 opencv-python 
 huggingface-hub
 einops
-fvcore
-iopath
-# pytorch3d # Should install with conda not pip
+# fvcore
+# iopath
+# pytorch3d # Should install from source

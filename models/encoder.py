@@ -7,7 +7,11 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 
-from pytorch3d_transforms_rotation_conversions import matrix_to_axis_angle
+from pytorch3d.transforms.rotation_conversions import matrix_to_axis_angle, quaternion_apply, axis_angle_to_matrix
+from pytorch3d.transforms import Rotate
+from pytorch3d.ops.points_alignment import corresponding_points_alignment
+from pytorch3d.ops.utils import convert_pointclouds_to_tensor
+from pytorch3d.structures import Pointclouds
 
 
 def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.Tensor:
@@ -211,19 +215,24 @@ class Encoder(nn.Module):
         kp_A = mask_batch_A['keypoints']
         kp_B = mask_batch_B['keypoints']
 
-        r, translation = self.compute_rotation_and_translation(kp_A, kp_B)
+        kp_A_pt_cloud = Pointclouds(points=kp_A)
+        kp_B_pt_cloud = Pointclouds(points=kp_B)
 
-        # pytorch3d calculation
+        similarity_transform = corresponding_points_alignment(kp_A_pt_cloud, kp_B_pt_cloud, estimate_scale=False, allow_reflection=False)
+        r, translation = similarity_transform.R, similarity_transform.T
+
         axis_angle = matrix_to_axis_angle(r)
         angle_counterclockwise_radians = torch.linalg.norm(axis_angle, dim=1)
         axis_of_rotation = axis_angle / angle_counterclockwise_radians[:,None]
 
-        # TODO try predicting axis with model as offset from y axis
-        # y_axis = torch.tensor([1,0,0])
-        # predicted_offset_from_y_axis = None 
-        # axis_of_rotation = y_axis + predicted_offset_from_y_axis
+        # Define a transformation.
+        alpha = input_dict['degrees']
+        # trans = translation # Translation calculated later
+        axis_angle = axis_of_rotation * alpha[:,None]
+        rotation = axis_angle_to_matrix(axis_angle)
+        kp_transform = Rotate(rotation) #.translate(trans)
 
-        kp_A_rotated = self.rotate_keypoints(kp_A, axis_of_rotation, input_dict["degrees"])
+        kp_A_rotated = kp_transform.transform_points(kp_A)
 
         # Align mean of kp_A_rotated with mean of kp_B
         mean_A = kp_A_rotated.mean(dim=1)
