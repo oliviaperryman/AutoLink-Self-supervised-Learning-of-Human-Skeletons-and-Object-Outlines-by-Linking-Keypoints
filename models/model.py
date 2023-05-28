@@ -62,11 +62,20 @@ class Model(pl.LightningModule):
         self.vgg_loss.eval()
         out_batch = self.decoder(self.encoder(batch, need_masked_img=True))
 
-        perceptual_loss = self.vgg_loss(out_batch['img'], batch['img_rotated'])
+        batch_reversed = batch.copy()
+        batch_reversed['img'] = batch['img_rotated']
+        batch_reversed['img_rotated'] = batch['img']
+        batch_reversed['degrees'] = -batch['degrees']
+        out_batch_reversed = self.decoder(self.encoder(batch_reversed, need_masked_img=True))
 
-        self.log("perceptual_loss", perceptual_loss)
+        perceptual_loss = self.vgg_loss(out_batch['img'], batch['img_rotated'])
+        perceptual_loss_reversed = self.vgg_loss(out_batch_reversed['img'], batch_reversed['img_rotated'])
+
+        total_loss = perceptual_loss + perceptual_loss_reversed
+
+        self.log("perceptual_loss", total_loss)
         self.log("alpha", self.decoder.alpha.detach().cpu())
-        return perceptual_loss
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         return batch
