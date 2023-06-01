@@ -23,7 +23,7 @@ def predict_image(image_in_img: PIL.Image.Image, image_in_video: PIL.Image.Image
     if image_in_video == None and image_in_img == None:
         raise gr.Error("Please upload a video or image.")
     image_in = image_in_img if image_in_img else image_in_video
-    edge_map = autolink(image_in)
+    edge_map = autolink.forward_no_multiview(image_in)
     return edge_map
 
 
@@ -35,7 +35,7 @@ def predict_video(video_in: str) -> str:
     writer = imageio.get_writer(video_out, mode='I', fps=video_in.get_meta_data()['fps'])
     for image_in in video_in:
         image_in = PIL.Image.fromarray(image_in)
-        edge_map = autolink(image_in)
+        edge_map = autolink.forward_no_multiview(image_in)
         writer.append_data(np.array(edge_map))
     writer.close()
     return video_out

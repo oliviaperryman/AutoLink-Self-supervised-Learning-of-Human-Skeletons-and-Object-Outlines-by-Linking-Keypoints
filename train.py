@@ -2,6 +2,7 @@ import argparse
 import importlib
 import os
 
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
@@ -34,6 +35,13 @@ if __name__ == '__main__':
     args.log = '{0}_k{1}_m{2}_b{3}_t{4}_sklr{5}'.format(args.dataset, args.n_parts, args.missing, args.block, args.thick, args.sklr)
     wandb_logger = WandbLogger(name=args.log, project=args.project)
     model = importlib.import_module('models.' + args.model).Model(**vars(args))
+    
+    # Optionally load state dict
+    # checkpoint = torch.load(os.path.join('checkpoints', 'cars_multiview_k8_m0.9_b12_t0.0025_sklr512.0', 'model.ckpt'))
+    # model.load_state_dict(checkpoint['state_dict'])
+    # model.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    # epoch = checkpoint['epoch']
+    # loss = checkpoint['loss']
 
     checkpoint_callback = pl.callbacks.ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1,
                                                        dirpath=os.path.join('checkpoints', model.hparams.log),
