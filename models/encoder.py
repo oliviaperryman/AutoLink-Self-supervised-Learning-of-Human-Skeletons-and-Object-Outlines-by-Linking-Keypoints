@@ -110,7 +110,7 @@ class Detector(nn.Module):
         z = depth.sum(dim=2)
         # normalize to -1, 1
         z = torch.tanh(z)
-        # depth = torch.tanh(z / 10) if depth gets too big
+        # z = torch.tanh(z / 10) # if depth gets too big
 
         keypoints_xyz = torch.cat((keypoints,z), dim=-1)
 
@@ -215,6 +215,10 @@ class Encoder(nn.Module):
         kp_A = mask_batch_A['keypoints']
         kp_B = mask_batch_B['keypoints']
 
+        # Swap from yxz to xyz
+        # kp_A = kp_A[:, :, [1, 0, 2]]
+        # kp_B = kp_B[:, :, [1, 0, 2]]
+
         kp_A_pt_cloud = Pointclouds(points=kp_A)
         kp_B_pt_cloud = Pointclouds(points=kp_B)
 
@@ -226,7 +230,8 @@ class Encoder(nn.Module):
         axis_of_rotation = axis_angle / angle_counterclockwise_radians[:,None]
 
         # Define a transformation.
-        alpha = input_dict['degrees']
+        DEG_TO_RAD = np.pi / 180
+        alpha = input_dict['degrees'] * DEG_TO_RAD
         # trans = translation # Translation calculated later
         axis_angle = axis_of_rotation * alpha[:,None]
         rotation = axis_angle_to_matrix(axis_angle)
@@ -245,6 +250,11 @@ class Encoder(nn.Module):
         std_B = kp_B.std(dim=1)
         kp_A_rotated_adjusted = kp_A_rotated_adjusted / std_A[:, None, :]
         kp_A_rotated_adjusted = kp_A_rotated_adjusted * std_B[:, None, :]
+
+        # swap back from xyz to yxz
+        # kp_A = kp_A[:, :, [1, 0, 2]]
+        # kp_A_rotated = kp_A_rotated[:, :, [1, 0, 2]]
+        # kp_A_rotated_adjusted = kp_A_rotated_adjusted[:, :, [1, 0, 2]]
 
         mask_batch_A["keypoints_before_rotation"] = kp_A
         mask_batch_A["keypoints_before_adjustment"] = kp_A_rotated
