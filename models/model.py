@@ -58,6 +58,37 @@ class Model(pl.LightningModule):
         plt.close(fig)
         return plot
 
+    def forward_no_multiview(self, x: PIL.Image.Image) -> PIL.Image.Image:
+        """
+        :param x: a PIL image
+        :return: an edge map of the same size as x with values in [0, 1] (normalized by max)
+        """
+        w, h = x.size
+        x = self.transform(x).unsqueeze(0)
+        x = x.to(self.device)
+        kp = self.encoder.detector(x)["keypoints"]
+        edge_map = self.decoder.rasterize(kp, output_size=64)
+        bs = edge_map.shape[0]
+        edge_map = edge_map / (1e-8 + edge_map.reshape(bs, 1, -1).max(dim=2, keepdim=True)[0].reshape(bs, 1, 1, 1))
+        edge_map = torch.cat([edge_map] * 3, dim=1)
+        edge_map = F.interpolate(edge_map, size=(h, w), mode='bilinear', align_corners=False)
+        x = torch.clamp(edge_map + (x * 0.5 + 0.5)*0.5, min=0, max=1)
+        x = transforms.ToPILImage()(x[0].detach().cpu())
+
+        fig = plt.figure(figsize=(1, h/w), dpi=w)
+        fig.tight_layout(pad=0)
+        plt.axis('off')
+        plt.imshow(x)
+        kp = kp[0].detach().cpu() * 0.5 + 0.5
+        kp[:, 1] *= w
+        kp[:, 0] *= h
+        plt.scatter(kp[:, 1], kp[:, 0], s=min(w/h, min(1, h/w)), marker='o')
+        ncols, nrows = fig.canvas.get_width_height()
+        fig.canvas.draw()
+        plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(nrows, ncols, 3)
+        plt.close(fig)
+        return plot
+
     def training_step(self, batch, batch_idx):
         self.vgg_loss.eval()
         out_batch = self.decoder(self.encoder(batch, need_masked_img=True))
