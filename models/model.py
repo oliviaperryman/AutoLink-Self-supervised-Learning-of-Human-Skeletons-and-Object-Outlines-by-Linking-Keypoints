@@ -74,18 +74,26 @@ class Model(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         self.log("val_loss", -self.global_step*1.0)
         imgs = denormalize(outputs[0]['img']).cpu()
-        recon_batch = self.decoder(self.encoder(outputs[0], need_masked_img=True))
+        imgs_rotated = denormalize(outputs[0]['img_rotated']).cpu()
+        encoder_outputs = self.encoder(outputs[0], need_masked_img=True)
+        depth = encoder_outputs['depth'][0].reshape(self.encoder.detector.n_parts,1,self.encoder.detector.output_size,self.encoder.detector.output_size).cpu()
+        recon_batch = self.decoder(encoder_outputs)
         scaled_kp = recon_batch['keypoints'] * self.hparams.image_size / 2 + self.hparams.image_size / 2
+        scaled_kp_before_rotation = recon_batch['keypoints_before_rotation'] * self.hparams.image_size / 2 + self.hparams.image_size / 2
 
         heatmap = recon_batch['heatmap'].cpu()
         heatmap_overlaid = torch.cat([heatmap] * 3, dim=1) / heatmap.max()
         heatmap_overlaid = torch.clamp(heatmap_overlaid + imgs * 0.5, min=0, max=1)
 
-        self.logger.experiment.log({'generated': [wandb.Image(draw_img_grid(denormalize(outputs[0]['img']).cpu()), caption='original_image'),
+        self.logger.experiment.log({'generated': [wandb.Image(draw_img_grid(imgs), caption='original_image'),
+                                                  wandb.Image(draw_img_grid(imgs_rotated), caption='rotated_image'),
+                                                  wandb.Image(draw_img_grid(denormalize(encoder_outputs['damaged_img']).cpu()), caption='masked_image'),
+                                                  wandb.Image(draw_img_grid(depth, normalize=True), caption='depth'),
                                                   wandb.Image(draw_img_grid(denormalize(recon_batch['img']).cpu()), caption='reconstructed'),
                                                   wandb.Image(draw_img_grid(heatmap_overlaid.cpu()), caption='heatmap_overlaid'),
                                                   wandb.Image(draw_kp_grid_unnorm(recon_batch['heatmap'], scaled_kp), caption='heatmap'),
-                                                  wandb.Image(wandb.Image(draw_kp_grid(imgs, scaled_kp)), caption='keypoints'),
+                                                  wandb.Image(wandb.Image(draw_kp_grid(imgs, scaled_kp_before_rotation)), caption='keypoints'),
+                                                  wandb.Image(wandb.Image(draw_kp_grid(imgs_rotated, scaled_kp)), caption='keypoints_after_rotation'),
                                                   wandb.Image(draw_matrix(self.decoder.skeleton_scalar_matrix().detach().cpu().numpy()), caption='skeleton_scalar')]})
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):

@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import matplotlib.pyplot as plt
 
 
 def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.Tensor:
@@ -12,7 +13,7 @@ def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.
     Generate a grid of size (grid_size, grid_size, 2) with coordinate values in the range [left_end, right_end]
     """
     x = torch.linspace(left_end, right_end, grid_size)
-    x, y = torch.meshgrid([x, x], indexing='ij')
+    x, y = torch.meshgrid([x, x], indexing='xy')
     grid = torch.cat((x.reshape(-1, 1), y.reshape(-1, 1)), dim=1).reshape(grid_size, grid_size, 2)
     return grid
 
@@ -70,7 +71,7 @@ class Detector(nn.Module):
     def __init__(self, hyper_paras: pl.utilities.parsing.AttributeDict) -> None:
         super().__init__()
         self.n_parts = hyper_paras.n_parts
-        self.output_size = 16
+        self.output_size = 32
 
         self.conv = nn.Sequential(
             ResBlock(3, 64),  # 64
@@ -78,53 +79,70 @@ class Detector(nn.Module):
             ResBlock(128, 256),  # 16
             ResBlock(256, 512),  # 8
             TransposedBlock(512, 256),  # 16
-            # save memory in 3D, make grid only 16x16x16
-            # TransposedBlock(256, 128),  # 32 
-            nn.Conv2d(256, self.n_parts * self.output_size, kernel_size=3, padding=1),
-            torch.nn.Unflatten(1, (self.n_parts,self.output_size)),
+            TransposedBlock(256, 128),  # 32 
+            nn.Conv2d(128, self.n_parts * 2, kernel_size=3, padding=1), # double channels for xy and depth
         )
 
-        # grid = gen_grid2d(self.output_size).reshape(1, 1, self.output_size ** 2, 2) 
-        grid = gen_grid3d(self.output_size).reshape(1, 1, self.output_size ** 3, 3)
+        grid = gen_grid2d(self.output_size).reshape(1, 1, self.output_size ** 2, 2) 
         self.coord = nn.Parameter(grid, requires_grad=False)
 
     def forward(self, input_dict: dict) -> dict:
         img = F.interpolate(input_dict['img'], size=(128, 128), mode='bilinear', align_corners=False)
-        prob_map = self.conv(img).reshape(img.shape[0], self.n_parts, -1, 1)
-        prob_map = F.softmax(prob_map, dim=2)
-        keypoints = self.coord * prob_map
+        prob_maps = self.conv(img)
+        prob_map_xy = prob_maps[:, :self.n_parts, :, :]
+        prob_map_z = prob_maps[:, self.n_parts:, :, :]
+
+        # calculate keypoints
+        prob_map_xy = prob_map_xy.reshape(img.shape[0], self.n_parts, -1, 1)
+        prob_map_xy = F.softmax(prob_map_xy, dim=2)
+        keypoints = self.coord * prob_map_xy
         keypoints = keypoints.sum(dim=2)
-        prob_map = prob_map.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size, self.output_size)
+
+        # calculate depth
+        prob_map_z = prob_map_z.reshape(img.shape[0], self.n_parts, -1, 1)
+        depth = prob_map_z * prob_map_xy
+        z = depth.sum(dim=2)
+        # normalize to -1, 1
+        z = torch.tanh(z)
+        # depth = torch.tanh(z / 10) if depth gets too big
+
+        keypoints_xyz = torch.cat((keypoints,z), dim=-1)
 
         # rotate keypoints
-        # center keypoints around 0,0,0
-        # centered_keypoints = keypoints - self.output_size / 2
-        
-        # Change keypoints from (depth, height, width) to (width, height, depth)
-        perm = torch.LongTensor([2, 1, 0])
-        keypoints_xyz = keypoints[:, :, perm]
+        # keypoints are y,x so rotate around first dimension and negative degrees
+        r = R.from_rotvec([(-deg) * np.array([1, 0, 0]) for deg in input_dict["degrees"].detach().cpu().numpy()], degrees=True)
+        matrix = r.as_matrix()
+        keypoints_xyz_rot = torch.einsum('ijk,imk->imj', torch.tensor(matrix).to('cuda').float(), keypoints_xyz.clone())
 
-        detached_keypoints = keypoints_xyz.detach().cpu().numpy()
+        prob_map_xy = prob_map_xy.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size)
 
-        # rotate around y axis
-        for batch in range(keypoints.shape[0]):
-            r = R.from_rotvec(input_dict["degrees"][batch].detach().cpu().numpy() * np.array([0, 0, 1]), degrees=True)
-            for kp in range(keypoints.shape[1]):
-                detached_keypoints[batch, kp] = r.apply(detached_keypoints[batch, kp])
+        return {'keypoints': keypoints_xyz_rot, 'prob_map': prob_map_xy, "keypoints_before_rotation": keypoints_xyz, "depth": depth}
 
-        keypoints_xyz_rotated = torch.tensor(detached_keypoints).to(input_dict['img'].device)
+# Debugging functions
+def save_2D_kp(kp, name):
+    plt.clf()
+    plt.scatter(kp[0].detach().cpu()[:,0], kp[0].detach().cpu()[:,1])
+    plt.xlim(-1,1)
+    plt.ylim(-1,1)
+    plt.savefig(name)
 
-        # move keypoints back to original position
-        # keypoints = centered_keypoints + self.output_size / 2
+def save_2D_kp_rot(kp, kp_rot, name):
+    plt.clf()
+    plt.scatter(kp[0].detach().cpu()[:,0], kp[0].detach().cpu()[:,1])
+    plt.scatter(kp_rot[0].detach().cpu()[:,0], kp_rot[0].detach().cpu()[:,1])
+    plt.xlim(-1,1)
+    plt.ylim(-1,1)
+    plt.savefig(name)
 
-        # Change keypoints from (width, height, depth) to (width, height)
-        keypoints_xy_rotated = keypoints_xyz_rotated[:,:,:2]
-
-        # Change keypoints back to (height, width)
-        perm = torch.LongTensor([1, 0])
-        keypoints = keypoints_xy_rotated[:, :, perm]
-
-        return {'keypoints': keypoints, 'prob_map': prob_map}
+def save_3D_kp(kp, name, elev=90, azim=270, roll=0):
+    plt.clf()
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d")
+    ax.scatter(kp[0].detach().cpu()[:,0], kp[0].detach().cpu()[:,1], kp[0].detach().cpu()[:,2])
+    ax.view_init(elev=elev, azim=azim, roll=roll)
+    plt.xlim(-1,1)
+    plt.ylim(-1,1)
+    plt.savefig(name)
 
 
 class Encoder(nn.Module):
