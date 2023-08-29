@@ -59,12 +59,7 @@ class TrainSet(torch.utils.data.Dataset):
             img_wobg = self.transform(img) * self.to_tensor(mask)
             multiviews[camera] = img_wobg
 
-        # projection from one view to another
-        P1 = self.proj_matrix(subject_index, self.cameras[0])
-        P2 = self.proj_matrix(subject_index, self.cameras[1])
-
-        # rotation_matrix = P1 @ np.linalg.inv(P2)
-        rotation_matrix = P1
+        rotation_matrix = self.compute_transformation(subject_index, self.cameras[0], self.cameras[1])
 
         return {'img': multiviews[self.cameras[0]], 'img_rotated': multiviews[self.cameras[1]], 'rotation_matrix': rotation_matrix }
 
@@ -78,6 +73,30 @@ class TrainSet(torch.utils.data.Dataset):
 
         P = calibration_matrix @ np.hstack([R, t])
         return P
+    
+    def compute_rotation_matrix(self, P1, P2):
+        q1, R1 = np.linalg.qr(P1, mode='complete')
+        q2, R2 = np.linalg.qr(P2, mode='complete')
+
+        # Extract rotation matrices from the QR decomposition
+        R1 = R1[:3, :3]
+        R2 = R2[:3, :3]
+
+        # Compute the rotation matrix from view 1 to view 2
+        rotation_matrix = np.dot(R2, R1.T)
+
+        return rotation_matrix
+    
+    def compute_transformation(self, subject_index, camera1, camera2):
+        rt = np.eye(4)
+        rt[:3, :3] = self.camera_parameters["extrinsics"][f"S{subject_index}"][camera1]["R"]
+        rt[:3, 3] = np.array(self.camera_parameters["extrinsics"][f"S{subject_index}"][camera1]["t"]).flatten()
+        rt_inv = np.linalg.inv(rt)
+
+        rt2 = np.eye(4)
+        rt2[:3, :3] = self.camera_parameters["extrinsics"][f"S{subject_index}"][camera2]["R"]
+        rt2[:3, 3] = np.array(self.camera_parameters["extrinsics"][f"S{subject_index}"][camera2]["t"]).flatten()
+        return rt2 @ rt_inv
 
 
 class TrainRegSet(TrainSet):
@@ -170,3 +189,14 @@ def test_epoch_end(batch_list_list):
             break
 
     return {'val_loss': dist.mean(), 'beta': beta}
+
+
+import matplotlib.pyplot as plt
+
+if __name__ == "__main__":
+    ts = TrainSet("/local/omp/data/h36m/human_images/", 128)
+    plt.imshow(ts[0]['img'].numpy().transpose(1,2,0) * 0.5 + 0.5)
+    plt.show()
+    plt.imshow(ts[0]['img_rotated'].numpy().transpose(1,2,0) * 0.5 + 0.5)
+    plt.show()
+    print(ts[0]['rotation_matrix'])
