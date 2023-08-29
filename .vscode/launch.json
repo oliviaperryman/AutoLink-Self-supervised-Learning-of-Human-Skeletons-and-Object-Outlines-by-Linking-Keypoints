@@ -1,0 +1,46 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Train",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/local/omp/AutoLink-Self-supervised-Learning-of-Human-Skeletons-and-Object-Outlines-by-Linking-Keypoints/",
+                "CUDA_VISIBLE_DEVICES": "0" 
+            },
+            "args": [
+                "--n_parts",
+                "8",
+                "--missing",
+                "0.80",
+                "--block",
+                "16",
+                "--thick",
+                "2.5e-3",
+                "--sklr",
+                "512",
+                "--data_root",
+                "/local/omp/data/h36m/human_images",
+                "--dataset",
+                "h36m_wobg",
+                "--batch_size",
+                "16"
+            ]
+        },
+    ]
+}
