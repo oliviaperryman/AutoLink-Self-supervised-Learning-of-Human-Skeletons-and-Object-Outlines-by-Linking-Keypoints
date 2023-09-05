@@ -24,6 +24,8 @@
                 "CUDA_VISIBLE_DEVICES": "0" 
             },
             "args": [
+                "--debug",
+                "0",
                 "--n_parts",
                 "8",
                 "--missing",
@@ -35,9 +37,9 @@
                 "--sklr",
                 "512",
                 "--data_root",
-                "cars/epfl-gims08/",
+                "/local/omp/data/h36m/human_images",
                 "--dataset",
-                "cars_multiview_mixed",
+                "h36m_wobg_multiview",
                 "--batch_size",
                 "16"
             ]

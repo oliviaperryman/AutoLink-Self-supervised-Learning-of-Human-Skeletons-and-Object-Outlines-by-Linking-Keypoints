@@ -6,3 +6,17 @@ __pycache__
 *.pyc
 flagged
 gif
+
+.vscode/settings.json
+*.zip
+*.tar
+*.gz
+output_imgs/
+3d_shapes/
+cars/
+annotation_3dshapes.csv
+grey4/
+stanford_cars/
+scratch/
+visualizations/
+ref.py

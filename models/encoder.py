@@ -106,13 +106,13 @@ class Detector(nn.Module):
         z = torch.tanh(z)
         # depth = torch.tanh(z / 10) if depth gets too big
 
-        keypoints_xyz = torch.cat((keypoints,z), dim=-1)
+        keypoints_xyz = torch.cat((keypoints,z), dim=-1) # B x n_parts x 3
 
-        # rotate keypoints
-        # keypoints are y,x so rotate around first dimension and negative degrees
-        r = R.from_rotvec([(-deg) * np.array([1, 0, 0]) for deg in input_dict["degrees"].detach().cpu().numpy()], degrees=True)
-        matrix = r.as_matrix()
-        keypoints_xyz_rot = torch.einsum('ijk,imk->imj', torch.tensor(matrix).to('cuda').float(), keypoints_xyz.clone())
+        # transform keypoints
+        transformation_matrix = input_dict["transformation_matrix"] # B x 4 x 4
+        keypoints_xyz_extra_dim = torch.cat((keypoints_xyz, torch.ones(keypoints_xyz.shape[0], keypoints_xyz.shape[1], 1, device=keypoints_xyz.device)), dim=-1) # B x n_parts x 4
+        keypoints_xyz_rot = torch.einsum('ijk,imk->imj', transformation_matrix.float(), keypoints_xyz_extra_dim)
+        keypoints_xyz_rot = keypoints_xyz_rot[:, :, :3] # B x n_parts x 3
 
         prob_map_xy = prob_map_xy.reshape(keypoints.shape[0], self.n_parts, self.output_size, self.output_size)
 
