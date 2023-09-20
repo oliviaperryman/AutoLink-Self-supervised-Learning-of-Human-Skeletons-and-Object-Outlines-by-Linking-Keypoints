@@ -4,6 +4,8 @@ from torch import nn
 from typing import Union
 import pytorch_lightning as pl
 
+import torchvision
+from models.encoder import gen_grid3d
 
 def gen_grid2d(grid_size: int, left_end: float=-1, right_end: float=1) -> torch.Tensor:
     """
@@ -128,10 +130,11 @@ class Decoder(nn.Module):
     def rasterize(self, keypoints: torch.Tensor, output_size: int=128) -> torch.Tensor:
         """
         Generate edge heatmap from keypoints, where edges are weighted by the learned scalars.
-        :param keypoints: (batch_size, n_points, 2)
+        :param keypoints: (batch_size, n_points, 3)
         :return: (batch_size, 1, heatmap_size, heatmap_size)
         """
 
+        # Only take first two dims of keypoints
         paired_joints = torch.stack([keypoints[:, self.skeleton_idx[0], :2], keypoints[:, self.skeleton_idx[1], :2]], dim=2)
 
         skeleton_scalar = F.softplus(self.skeleton_scalar * self.sklr)
@@ -141,6 +144,10 @@ class Decoder(nn.Module):
         skeleton_heatmap_sep = draw_lines(paired_joints, heatmap_size=output_size, thick=self.thick)
         skeleton_heatmap_sep = skeleton_heatmap_sep * skeleton_scalar.reshape(1, self.n_skeleton, 1, 1)
         skeleton_heatmap = skeleton_heatmap_sep.max(dim=1, keepdim=True)[0]
+
+        # Resize to image size
+        # skeleton_heatmap = torchvision.transforms.Resize(128)(skeleton_heatmap)
+
         return skeleton_heatmap
 
     def forward(self, input_dict: dict) -> dict:
